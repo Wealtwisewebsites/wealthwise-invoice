@@ -275,12 +275,69 @@ export default function InvoiceStudio() {
     setView("editor");
   }
 
-  function handleExport() {
-    const next = String((parseInt(docNumber, 10) || 0) + 1);
+  const [exporting, setExporting] = useState(false);
+
+  async function handleExport() {
+    if (exporting) return;
+    const target = document.querySelector(".ww-a4");
+    if (!target) return;
+
+    setExporting(true);
     try {
-      localStorage.setItem(STORAGE_NUM, next);
-    } catch (e) {}
-    try { window.print(); } catch (e) {}
+      const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
+        import("jspdf"),
+        import("html2canvas-pro"),
+      ]);
+      const canvas = await html2canvas(target, {
+        scale: 3,
+        useCORS: true,
+        backgroundColor: "#ffffff",
+        logging: false,
+        windowWidth: target.scrollWidth,
+        windowHeight: target.scrollHeight,
+      });
+
+      const pdf = new jsPDF({
+        orientation: "portrait",
+        unit: "mm",
+        format: "a4",
+        compress: true,
+      });
+
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const imgData = canvas.toDataURL("image/jpeg", 0.95);
+      const imgWidth = pageWidth;
+      const imgHeight = (canvas.height * pageWidth) / canvas.width;
+
+      if (imgHeight <= pageHeight) {
+        pdf.addImage(imgData, "JPEG", 0, 0, imgWidth, imgHeight, undefined, "FAST");
+      } else {
+        let remaining = imgHeight;
+        let position = 0;
+        while (remaining > 0) {
+          pdf.addImage(imgData, "JPEG", 0, position, imgWidth, imgHeight, undefined, "FAST");
+          remaining -= pageHeight;
+          if (remaining > 0) {
+            position -= pageHeight;
+            pdf.addPage();
+          }
+        }
+      }
+
+      const label = docType === "invoice" ? "Invoice" : "Quote";
+      const safeNumber = String(docNumber || "").replace(/[^a-z0-9-_]/gi, "");
+      pdf.save(`${label} ${safeNumber}.pdf`);
+
+      const next = String((parseInt(docNumber, 10) || 0) + 1);
+      try {
+        localStorage.setItem(STORAGE_NUM, next);
+      } catch (e) {}
+    } catch (e) {
+      alert("Could not export PDF. Please try again.");
+    } finally {
+      setExporting(false);
+    }
   }
 
   function handleFile(file) {
@@ -538,23 +595,24 @@ export default function InvoiceStudio() {
           }}>← Edit</button>
           {!isMobile ? (
             <div style={{ color: "#bdb38f", fontFamily: FONT_BODY, fontSize: 12, fontStyle: "italic" }}>
-              Choose 'Save as PDF' in the print dialog
+              {exporting ? "Generating PDF…" : "Click Export PDF to download"}
             </div>
           ) : null}
-          <button onClick={handleExport} style={{
-            background: COLORS.gold,
+          <button onClick={handleExport} disabled={exporting} style={{
+            background: exporting ? "#8c7344" : COLORS.gold,
             border: "none",
             color: COLORS.charcoal,
             padding: isMobile ? "8px 14px" : "10px 22px",
             fontFamily: FONT_BODY,
             fontSize: 13,
             fontWeight: 700,
-            cursor: "pointer",
+            cursor: exporting ? "default" : "pointer",
             borderRadius: 4,
             letterSpacing: "0.5px",
             textTransform: "uppercase",
             minHeight: isMobile ? 38 : 36,
-          }}>Export PDF</button>
+            opacity: exporting ? 0.7 : 1,
+          }}>{exporting ? "Exporting…" : "Export PDF"}</button>
         </div>
 
         {isMobile ? (
@@ -565,7 +623,7 @@ export default function InvoiceStudio() {
             fontStyle: "italic",
             padding: "8px 14px",
             textAlign: "center",
-          }}>Tap Export PDF, then choose "Save as PDF"</div>
+          }}>{exporting ? "Generating PDF, please wait…" : "Tap Export PDF to download"}</div>
         ) : null}
 
         <div className="ww-preview-stage" style={{
